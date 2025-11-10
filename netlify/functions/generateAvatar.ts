@@ -1,9 +1,10 @@
 // 파일 위치: netlify/functions/generateAvatar.ts
+// (Gemini 대신 OpenAI API를 사용하도록 수정한 전체 코드)
 
-import { GoogleGenAI, Modality } from "@google/genai";
+import { OpenAI } from "openai"; // OpenAI 라이브러리를 가져옵니다.
 import type { Handler } from "@netlify/functions";
 
-// AvatarSelections 타입을 가져옵니다. (경로가 다를 경우 수정 필요)
+// AvatarSelections 타입 정의 (기존과 동일)
 interface AvatarSelections {
   body: string;
   hair: string;
@@ -12,8 +13,9 @@ interface AvatarSelections {
 }
 
 // -------------------------------------------------
-// geminiService.ts에 있던 프롬프트 함수들을
-// 그대로 복사해서 이 서버 파일로 가져옵니다.
+// 프롬프트 생성 함수 (기존과 동일)
+// 참고: DALL-E는 Gemini와 프롬프트 해석 방식이 다를 수 있습니다.
+// 결과물이 마음에 들지 않으면 이 프롬프트 내용을 DALL-E에 맞게 수정해야 할 수 있습니다.
 // -------------------------------------------------
 const constructPrompt = (selections: AvatarSelections, style: '2D' | '3D' | 'any'): string => {
   let styleInstruction = "";
@@ -58,47 +60,49 @@ const constructPrompt = (selections: AvatarSelections, style: '2D' | '3D' | 'any
     -   The creature should be the only subject, full-body, facing the viewer.
     
     The final image must be a masterpiece of bizarre, clumsy, and hilariously pathetic character design.`;
-};
+}; //
 
-const generateSingleAvatar = async (ai: GoogleGenAI, selections: AvatarSelections, style: '2D' | '3D' | 'any'): Promise<string> => {
+// -------------------------------------------------
+// OpenAI (DALL-E)를 사용하여 이미지 1개를 생성하는 함수
+// -------------------------------------------------
+const generateSingleAvatar = async (
+  openai: OpenAI,
+  selections: AvatarSelections,
+  style: '2D' | '3D' | 'any'
+): Promise<string> => {
   const prompt = constructPrompt(selections, style);
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-image',
-    contents: {
-      parts: [
-        {
-          text: prompt,
-        },
-      ],
-    },
-    config: {
-        responseModalities: [Modality.IMAGE],
-    },
+  // OpenAI DALL-E API 호출
+  const response = await openai.images.generate({
+    model: "dall-e-3", // 또는 "dall-e-2" (dall-e-2는 3보다 저렴하지만 품질이 낮습니다)
+    prompt: prompt,
+    n: 1, // 1개의 이미지를 생성
+    size: "1024x1024", // DALL-E 3가 지원하는 크기
+    response_format: "b64_json", // 이미지를 Base64 문자열로 받습니다.
   });
 
-  for (const part of response.candidates[0].content.parts) {
-    if (part.inlineData) {
-      const base64ImageBytes: string = part.inlineData.data;
-      return `data:image/png;base64,${base64ImageBytes}`;
-    }
+  const b64Json = response.data[0]?.b64_json;
+
+  if (b64Json) {
+    // React 앱에서 바로 이미지로 사용할 수 있도록 data URI 형식으로 반환
+    return `data:image/png;base64,${b64Json}`;
   }
 
-  throw new Error("No image data received from API");
+  throw new Error("No image data received from OpenAI API");
 };
 
 // -------------------------------------------------
 // Netlify Function의 메인 핸들러
 // -------------------------------------------------
 export const handler: Handler = async (event) => {
-  // 1. API 키를 Netlify 환경 변수에서 안전하게 가져옵니다.
-  //    (주의: Netlify에서는 process.env.GEMINI_API_KEY로 읽어야 함)
-  const API_KEY = process.env.GEMINI_API_KEY;
+  // 1. API 키를 Netlify 환경 변수에서 가져옵니다.
+  //    (주의: Netlify 대시보드에 'OPENAI_API_KEY'로 설정해야 함)
+  const API_KEY = process.env.OPENAI_API_KEY;
 
   if (!API_KEY) {
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: "API_KEY environment variable not set on server" }),
+      body: JSON.stringify({ error: "OPENAI_API_KEY environment variable not set on server" }),
     };
   }
 
@@ -110,15 +114,15 @@ export const handler: Handler = async (event) => {
     // 2. React 앱이 보낸 selections 데이터를 파싱합니다.
     const selections = JSON.parse(event.body || "{}") as AvatarSelections;
 
-    // 3. API 클라이언트를 초기화합니다.
-    const ai = new GoogleGenAI({ apiKey: API_KEY });
+    // 3. API 클라이언트를 OpenAI로 초기화합니다.
+    const openai = new OpenAI({ apiKey: API_KEY });
 
-    // 4. geminiService.ts의 generateAvatarVariations 로직을 여기서 수행합니다.
+    // 4. 3가지 스타일의 이미지를 동시에 요청합니다.
     const [anyResult, twoDResult, threeDResult] = await Promise.all([
-      generateSingleAvatar(ai, selections, 'any'),
-      generateSingleAvatar(ai, selections, '2D'),
-      generateSingleAvatar(ai, selections, '3D'),
-    ]);
+      generateSingleAvatar(openai, selections, 'any'),
+      generateSingleAvatar(openai, selections, '2D'),
+      generateSingleAvatar(openai, selections, '3D'),
+    ]); //
 
     const results = {
       any: anyResult,
