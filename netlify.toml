@@ -2,7 +2,13 @@
 
 [functions]
   directory = "netlify/functions"
-  
+# ▼▼▼ 이 부분을 추가하세요 ▼▼▼
+# 'generateAvatar' 함수의 시간 제한을 20초로 늘립니다.
+# (Netlify Pro 플랜 등에서는 최대 26초까지 가능할 수 있습니다.)
+[functions."generateAvatar"]
+  timeout = 20
+# ▲▲▲ 여기까지 추가 ▲▲▲  
 [build]
   command = "npm run build"
+
   publish = "dist"
